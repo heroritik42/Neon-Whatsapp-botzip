@@ -57,34 +57,76 @@ const messageStore = new Map();
 const groupSettings = new Map();
 
 // Default welcome message
-const DEFAULT_WELCOME = "╭──❍ *WELCOME* ❍──╮\n│\n├─❍ *User:* @user\n├─❍ *Group:* @group\n├─❍ *Members:* @count\n│\n╰──────────────────────❍\n\n> Enjoy your stay! 🎉";
+const DEFAULT_WELCOME = "╭──❍ *WELCOME* ❍──╮\n│\n├─❍ *User:* @user\n├─❍ *Group:* @group\n├─❍ *Members:* @count\n│\n╰─────────────────❍";
 
 // Default goodbye message
-const DEFAULT_GOODBYE = "╭──❍ *GOODBYE* ❍──╮\n│\n├─❍ *User:* @user\n├─❍ *Group:* @group\n├─❍ *Left the group*\n│\n╰──────────────────────❍\n\n> We'll miss you! 👋";
+const DEFAULT_GOODBYE = "╭──❍ *GOODBYE* ❍──╮\n│\n├─❍ *User:* @user\n├─❍ *Group:* @group\n├─❍ *Left the group*\n│\n╰─────────────────❍";
 
 // Session handling
 const AUTH_DIR = path.join(__dirname, 'auth_info_baileys');
 const CREDS = path.join(AUTH_DIR, 'creds.json');
 
-if (!fs.existsSync(CREDS)) {
-  if (!config.SESSION_ID) {
-    console.log("❌ SESSION_ID missing");
-    process.exit(1);
+// ==================== SESSION VALIDATION & RESTORATION ====================
+function validateAndRestoreSession() {
+  try {
+    // If credentials already exist, skip restoration
+    if (fs.existsSync(CREDS)) {
+      try {
+        const existing = fs.readFileSync(CREDS, 'utf8');
+        JSON.parse(existing);
+        console.log("✅ Valid session found, using existing credentials");
+        return true;
+      } catch (e) {
+        console.log("⚠️ Corrupted session file detected, clearing...");
+        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+      }
+    }
+
+    // Try to restore from SESSION_ID
+    if (!config.SESSION_ID) {
+      console.log("⚠️ No SESSION_ID provided - bot will start fresh and generate new session");
+      fs.mkdirSync(AUTH_DIR, { recursive: true });
+      return true;
+    }
+
+    const session = config.SESSION_ID.trim();
+    
+    // Validate session format
+    if (!session.includes("Neon-AI~")) {
+      console.log("⚠️ Invalid SESSION_ID format - starting fresh session instead");
+      return true;
+    }
+
+    // Decode and validate session
+    try {
+      const decoded = Buffer.from(session.substring(7), 'base64').toString('utf8');
+      const parsedSession = JSON.parse(decoded);
+      
+      // Validate essential fields
+      if (!parsedSession.noiseKey || !parsedSession.signedPreKey) {
+        throw new Error("Missing essential session fields");
+      }
+
+      fs.mkdirSync(AUTH_DIR, { recursive: true });
+      fs.writeFileSync(CREDS, JSON.stringify(parsedSession), { encoding: 'utf8' });
+      console.log("♻️ Session restored successfully from SESSION_ID");
+      return true;
+    } catch (decodeError) {
+      console.log("⚠️ Failed to decode SESSION_ID:", decodeError.message);
+      console.log("ℹ️ Starting with fresh session - Please rescan QR code");
+      fs.mkdirSync(AUTH_DIR, { recursive: true });
+      return true;
+    }
+  } catch (error) {
+    console.error("❌ Session validation error:", error);
+    console.log("ℹ️ Continuing with fresh session...");
+    fs.mkdirSync(AUTH_DIR, { recursive: true });
+    return true;
   }
-  
-  let session = config.SESSION_ID.trim();
-  if (!session.includes("Neon-AI~")) {
-    console.log("❌ Invalid KIRA-MD session format");
-    process.exit(1);
-  }
-  
-  const decoded = Buffer.from(session.substring(7), 'base64').toString('utf8');
-  JSON.parse(decoded);
-  
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
-  fs.writeFileSync(CREDS, decoded, { encoding: 'utf8' });
-  console.log("♻️ KIRA-MD session restored successfully");
 }
+
+// Validate session before starting
+validateAndRestoreSession();
 
 // Load group settings from file if exists
 const SETTINGS_FILE = path.join(__dirname, 'group_settings.json');
@@ -242,7 +284,7 @@ async function connectToWA() {
       console.log(`✅ Plugins loaded: ${loadedCount}/${pluginFiles.length}`);
       
       // Send connection message with image
-      const aliveMsg = `*╭──────────────●●►*\n> *Neon-AI CONNECTED SUCCESSFULLY*\n\n> *Type ${prefix}menu to view commands*  \n\n*╭⊱✫ Neon-AI ✫⊱╮*\n*│✫📂 Bot Name: ${botConfig.BOT_NAME}*\n*│✫🛡️ Owner: ${config.OWNER_NAME}*\n*│✫♻️ Prefix: ${prefix}*\n*│✫🌍 Mode: ${config.MODE}*\n*│✫⏰ Uptime: ${runtime(process.uptime())}*\n*╰──────────────●●►*\n\n> Enjoy Using Neon-AI`;
+      const aliveMsg = `*╭──────────────●●►*\n> *Neon-AI CONNECTED SUCCESSFULLY*\n\n> *Type ${prefix}menu to view commands*  \n\n*╭⊱✫ Neon-AI ✫⊱╮*\n✅ Connected\n✨ Ready to serve\n🎯 All systems operational\n*╰⊱✫ Neon-AI ✫⊱╯*`;
       
       // Image URL for connection message
       const imageUrl = 'https://files.catbox.moe/kh4wjs.png';
@@ -274,7 +316,7 @@ async function connectToWA() {
   });
 
   // Anti-call feature
-  const callMsg = `⚠️ *ANTI-CALL IS ACTIVE* ⚠️\n\nDear User,\n\nYou have attempted to call the bot. To ensure uninterrupted service, please refrain from calling.\n\nThank you for your understanding.\n\n${botConfig.COPYRIGHT || 'KIRA-MD'}`;
+  const callMsg = `⚠️ *ANTI-CALL IS ACTIVE* ⚠️\n\nDear User,\n\nYou have attempted to call the bot. To ensure uninterrupted service, please refrain from calling.\n\nThank you for your understanding!`;
   
   sock.ev.on('call', async (calls) => {
     if (config.ANTI_CALL === 'true') {
@@ -289,7 +331,7 @@ async function connectToWA() {
   });
 
   // Emoji list for auto react
-  const emojiList = ['😊', '👍', '😂', '❤️', '🔥', '🥰', '👌', '💯', '🤣', '😎', '✨', '⭐', '🌟', '💫', '⚡', '💥', '🙏', '🎉', '👏', '💯', '👑', '🤖', '🫡', '✅', '🔰', '💚', '💙', '💜', '🖤', '🤍', '💛', '🧡', '💖', '💝', '💞'];
+  const emojiList = ['😊', '👍', '😂', '❤️', '🔥', '🥰', '👌', '💯', '🤣', '😎', '✨', '⭐', '🌟', '💫', '⚡', '💥', '🙏', '🎉', '👏', '💯', '👑', '🤖'];
   
   // Creds update
   sock.ev.on('creds.update', saveCreds);
@@ -601,7 +643,7 @@ async function connectToWA() {
           }
           
           if (!q) {
-            return reply(`❌ Please provide a welcome message!\n\nAvailable variables:\n@user - Mention user\n@group - Group name\n@count - Member count\n@desc - Group description\n\nExample:\n.setwelcome Hello @user! Welcome to @group`);
+            return reply(`❌ Please provide a welcome message!\n\nAvailable variables:\n@user - Mention user\n@group - Group name\n@count - Member count\n@desc - Group description\n\nExample:\n.setwelcome Welcome @user to @group!`);
           }
           
           groupSetting.welcomeMsg = q;
@@ -617,7 +659,7 @@ async function connectToWA() {
           }
           
           if (!q) {
-            return reply(`❌ Please provide a goodbye message!\n\nAvailable variables:\n@user - Mention user\n@group - Group name\n@count - Member count\n\nExample:\n.setgoodbye Goodbye @user! We'll miss you in @group`);
+            return reply(`❌ Please provide a goodbye message!\n\nAvailable variables:\n@user - Mention user\n@group - Group name\n@count - Member count\n\nExample:\n.setgoodbye Goodbye @user! We'll miss you.`);
           }
           
           groupSetting.goodbyeMsg = q;
